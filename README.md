@@ -4,6 +4,17 @@ A browser-based cryptography toolkit built with plain JavaScript and the Web Cry
 
 **Live demo:** https://fevenadane586-design.github.io/crypto-toolkit/
 
+## Screenshots
+
+### Encrypt / Decrypt
+![Encrypt and decrypt tab](screenshot-encrypt.png)
+
+### Hashing and file integrity
+![Hash tab](screenshot-hash.png)
+
+### Breach check
+![Breach check tab](screenshot-breach.png)
+
 ## Features
 
 - **Encrypt / Decrypt:** AES-256-GCM authenticated encryption with a password
