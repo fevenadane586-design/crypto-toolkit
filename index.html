@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crypto Toolkit</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 16px; color: #222; }
+    h1 { margin-bottom: 4px; }
+    .subtitle { color: #555; margin-top: 0; }
+    .tabs { display: flex; gap: 8px; margin: 20px 0; flex-wrap: wrap; }
+    .tabs button { padding: 10px 16px; border: 1px solid #1565c0; background: white; color: #1565c0; border-radius: 6px; cursor: pointer; font-size: 15px; }
+    .tabs button.active { background: #1565c0; color: white; }
+    section { display: none; }
+    section.active { display: block; }
+    label { display: block; margin-top: 12px; font-weight: bold; font-size: 14px; }
+    input[type="text"], input[type="password"], textarea {
+      width: 100%; padding: 10px; font-size: 15px; box-sizing: border-box; margin-top: 4px;
+      border: 1px solid #aaa; border-radius: 6px; font-family: inherit;
+    }
+    textarea { min-height: 90px; resize: vertical; }
+    .row { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+    .action { padding: 10px 18px; background: #1565c0; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; }
+    .action.secondary { background: #546e7a; }
+    .output { margin-top: 12px; padding: 12px; background: #f5f5f5; border: 1px solid #ddd; border-radius: 6px;
+      font-family: Consolas, monospace; font-size: 13px; word-break: break-all; white-space: pre-wrap; min-height: 20px; }
+    .hash-line { margin-bottom: 8px; }
+    .ok { color: #2e7d32; font-weight: bold; }
+    .bad { color: #c62828; font-weight: bold; }
+    .note { font-size: 12px; color: #666; margin-top: 32px; line-height: 1.5; }
+    .info { font-size: 13px; color: #555; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Crypto Toolkit</h1>
+  <p class="subtitle">Encryption, hashing and breach checking, all running in your browser.</p>
+
+  <div class="tabs">
+    <button class="active" data-tab="crypt">Encrypt / Decrypt</button>
+    <button data-tab="hash">Hash &amp; File Integrity</button>
+    <button data-tab="breach">Breach Check</button>
+  </div>
+
+  <!-- TAB 1 -->
+  <section id="crypt" class="active">
+    <label for="c-text">Text</label>
+    <textarea id="c-text" placeholder="Type text to encrypt, or paste encrypted text to decrypt"></textarea>
+    <label for="c-pass">Password</label>
+    <input type="password" id="c-pass" autocomplete="off" placeholder="Choose a strong password">
+    <div class="row">
+      <button class="action" id="btn-encrypt">Encrypt</button>
+      <button class="action secondary" id="btn-decrypt">Decrypt</button>
+    </div>
+    <div class="output" id="c-out"></div>
+    <p class="info">Algorithm: AES-256-GCM. Key derived with PBKDF2-SHA-256 (600,000 iterations) and a random 16-byte salt. A random 12-byte IV is used for every encryption.</p>
+  </section>
+
+  <!-- TAB 2 -->
+  <section id="hash">
+    <label for="h-text">Text to hash</label>
+    <textarea id="h-text" placeholder="Type text here"></textarea>
+    <div class="output" id="h-out"></div>
+
+    <label for="h-file">Or hash a file (SHA-256)</label>
+    <input type="file" id="h-file">
+    <div class="output" id="f-out"></div>
+
+    <label for="h-expected">Compare with an expected SHA-256 hash (for example from a download page)</label>
+    <input type="text" id="h-expected" placeholder="Paste the expected hash here">
+    <div class="output" id="cmp-out"></div>
+  </section>
+
+  <!-- TAB 3 -->
+  <section id="breach">
+    <label for="b-pass">Password to check</label>
+    <input type="password" id="b-pass" autocomplete="off" placeholder="Enter a password">
+    <div class="row">
+      <button class="action" id="btn-breach">Check</button>
+    </div>
+    <div class="output" id="b-out"></div>
+    <p class="info">How it works: your browser computes the SHA-1 hash of the password and sends only the first 5 characters of it to the Have I Been Pwned API. The API returns every hash that starts with those 5 characters, and your browser looks for a full match locally. The password itself is never sent.</p>
+  </section>
+
+  <p class="note">
+    Educational project. It has not been security audited, so do not rely on it to protect real secrets.
+    Keep your password safe: encrypted text cannot be recovered without it.
+  </p>
+
+  <script>
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+
+    // ---------- Helpers ----------
+    function toHex(buffer) {
+      return Array.from(new Uint8Array(buffer))
+        .map(function (b) { return b.toString(16).padStart(2, "0"); })
+        .join("");
+    }
+
+    function toBase64(bytes) {
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
+    }
+
+    function fromBase64(str) {
+      const binary = atob(str);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    }
+
+    // ---------- Tabs ----------
+    document.querySelectorAll(".tabs button").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        document.querySelectorAll(".tabs button").forEach(function (b) { b.classList.remove("active"); });
+        document.querySelectorAll("section").forEach(function (s) { s.classList.remove("active"); });
+        btn.classList.add("active");
+        document.getElementById(btn.dataset.tab).classList.add("active");
+      });
+    });
+
+    // ---------- Encrypt / Decrypt ----------
+    const cText = document.getElementById("c-text");
+    const cPass = document.getElementById("c-pass");
+    const cOut = document.getElementById("c-out");
+
+    async function deriveKey(password, salt) {
+      const baseKey = await crypto.subtle.importKey(
+        "raw", encoder.encode(password), "PBKDF2", false, ["deriveKey"]
+      );
+      return crypto.subtle.deriveKey(
+        { name: "PBKDF2", salt: salt, iterations: 600000, hash: "SHA-256" },
+        baseKey,
+        { name: "AES-GCM", length: 256 },
+        false,
+        ["encrypt", "decrypt"]
+      );
+    }
+
+    document.getElementById("btn-encrypt").addEventListener("click", async function () {
+      if (!cText.value || !cPass.value) {
+        cOut.textContent = "Enter both text and a password.";
+        return;
+      }
+      cOut.textContent = "Encrypting...";
+      try {
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const key = await deriveKey(cPass.value, salt);
+        const ciphertext = new Uint8Array(
+          await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, key, encoder.encode(cText.value))
+        );
+        const combined = new Uint8Array(salt.length + iv.length + ciphertext.length);
+        combined.set(salt, 0);
+        combined.set(iv, salt.length);
+        combined.set(ciphertext, salt.length + iv.length);
+        cOut.textContent = toBase64(combined);
+      } catch (e) {
+        cOut.textContent = "Encryption failed.";
+      }
+    });
+
+    document.getElementById("btn-decrypt").addEventListener("click", async function () {
+      if (!cText.value || !cPass.value) {
+        cOut.textContent = "Paste the encrypted text and enter the password.";
+        return;
+      }
+      cOut.textContent = "Decrypting...";
+      try {
+        const combined = fromBase64(cText.value.trim());
+        const salt = combined.slice(0, 16);
+        const iv = combined.slice(16, 28);
+        const ciphertext = combined.slice(28);
+        const key = await deriveKey(cPass.value, salt);
+        const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv }, key, ciphertext);
+        cOut.textContent = decoder.decode(plain);
+      } catch (e) {
+        cOut.textContent = "Decryption failed: wrong password, or the data was changed or is not valid.";
+      }
+    });
+
+    // ---------- Hashing ----------
+    const hText = document.getElementById("h-text");
+    const hOut = document.getElementById("h-out");
+    const hFile = document.getElementById("h-file");
+    const fOut = document.getElementById("f-out");
+    const hExpected = document.getElementById("h-expected");
+    const cmpOut = document.getElementById("cmp-out");
+    let fileHash = "";
+
+    async function hashText() {
+      hOut.textContent = "";
+      if (!hText.value) return;
+      const data = encoder.encode(hText.value);
+      const algs = ["SHA-1", "SHA-256", "SHA-512"];
+      for (const alg of algs) {
+        const digest = await crypto.subtle.digest(alg, data);
+        const line = document.createElement("div");
+        line.className = "hash-line";
+        line.textContent = alg + ": " + toHex(digest);
+        hOut.appendChild(line);
+      }
+    }
+    hText.addEventListener("input", hashText);
+
+    function compareHashes() {
+      const expected = hExpected.value.trim().toLowerCase();
+      cmpOut.className = "output";
+      if (!fileHash || !expected) {
+        cmpOut.textContent = "";
+        return;
+      }
+      if (expected === fileHash) {
+        cmpOut.innerHTML = "";
+        const span = document.createElement("span");
+        span.className = "ok";
+        span.textContent = "Match: the file is identical to the expected hash.";
+        cmpOut.appendChild(span);
+      } else {
+        cmpOut.innerHTML = "";
+        const span = document.createElement("span");
+        span.className = "bad";
+        span.textContent = "No match: the file differs from the expected hash. Do not trust it.";
+        cmpOut.appendChild(span);
+      }
+    }
+
+    hFile.addEventListener("change", async function () {
+      const file = hFile.files[0];
+      fileHash = "";
+      if (!file) { fOut.textContent = ""; return; }
+      fOut.textContent = "Hashing...";
+      const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+      fileHash = toHex(digest);
+      fOut.textContent = "SHA-256 of " + file.name + ":\n" + fileHash;
+      compareHashes();
+    });
+    hExpected.addEventListener("input", compareHashes);
+
+    // ---------- Breach check ----------
+    document.getElementById("btn-breach").addEventListener("click", async function () {
+      const out = document.getElementById("b-out");
+      const password = document.getElementById("b-pass").value;
+      if (!password) {
+        out.textContent = "Enter a password first.";
+        return;
+      }
+      out.textContent = "Checking...";
+      try {
+        const digest = await crypto.subtle.digest("SHA-1", encoder.encode(password));
+        const hash = toHex(digest).toUpperCase();
+        const prefix = hash.slice(0, 5);
+        const suffix = hash.slice(5);
+
+        const response = await fetch("https://api.pwnedpasswords.com/range/" + prefix);
+        if (!response.ok) throw new Error("API error");
+        const text = await response.text();
+
+        let count = 0;
+        text.split("\n").forEach(function (line) {
+          const parts = line.trim().split(":");
+          if (parts[0] === suffix) count = parseInt(parts[1], 10);
+        });
+
+        out.innerHTML = "";
+        const span = document.createElement("span");
+        if (count > 0) {
+          span.className = "bad";
+          span.textContent = "Found in " + count.toLocaleString() + " known breaches. Do not use this password.";
+        } else {
+          span.className = "ok";
+          span.textContent = "Not found in known breaches. This does not prove it is strong, only that it has not leaked.";
+        }
+        out.appendChild(span);
+        out.appendChild(document.createTextNode("\n\nHash prefix sent: " + prefix));
+      } catch (e) {
+        out.textContent = "Could not reach the breach database. Check your internet connection and try again.";
+      }
+    });
+  </script>
+</body>
+</html>
